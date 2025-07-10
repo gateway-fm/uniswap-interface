@@ -6,7 +6,6 @@ import { OnchainItemListOptionType, TokenOption } from 'uniswap/src/components/l
 import { useTradingApiSwappableTokensQuery } from 'uniswap/src/data/apiClients/tradingApi/useTradingApiSwappableTokensQuery'
 import { tradingApiSwappableTokenToCurrencyInfo } from 'uniswap/src/data/apiClients/tradingApi/utils/tradingApiSwappableTokenToCurrencyInfo'
 import { useCrossChainBalances } from 'uniswap/src/data/balances/hooks/useCrossChainBalances'
-import { useTokenProjectsQuery } from 'uniswap/src/data/graphql/uniswap-data-api/__generated__/types-and-hooks'
 import { GetSwappableTokensResponse } from 'uniswap/src/data/tradingApi/__generated__'
 import { GqlResult } from 'uniswap/src/data/types'
 import { TradeableAsset } from 'uniswap/src/entities/assets'
@@ -21,6 +20,23 @@ import {
 } from 'uniswap/src/features/transactions/swap/utils/tradingApi'
 import { buildCurrencyId, buildNativeCurrencyId } from 'uniswap/src/utils/currencyId'
 import { logger } from 'utilities/src/logger/logger'
+
+/**
+ * NOTE: This is a stub for web
+ * to avoid requests to TokenProjectsService
+ */
+function useTokenProjectsQueryStub(_variables: any) {
+  return {
+    data: { 
+      tokenProjects: [{ 
+        tokens: []  
+      }] 
+    },
+    loading: false,
+    error: null,
+    refetch: () => {},
+  }
+}
 
 export function useBridgingTokenWithHighestBalance({
   address,
@@ -44,11 +60,12 @@ export function useBridgingTokenWithHighestBalance({
   const tokenIn = currencyAddress ? getTokenAddressFromChainForTradingApi(currencyAddress, currencyChainId) : undefined
   const tokenInChainId = toTradingApiSupportedChainId(currencyChainId)
 
-  const { data: tokenProjectsData, loading: tokenProjectsLoading } = useTokenProjectsQuery({
+  // NOTE: This is a stub for web
+  const { data: tokenProjectsData, loading: tokenProjectsLoading } = useTokenProjectsQueryStub({
     variables: { contracts: [currencyIdToContractInput(currencyId)] },
   })
 
-  const crossChainTokens = tokenProjectsData?.tokenProjects?.[0]?.tokens
+  const crossChainTokens = tokenProjectsData?.tokenProjects[0]?.tokens
 
   const { otherChainBalances } = useCrossChainBalances({
     address,

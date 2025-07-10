@@ -1,3 +1,4 @@
+ 
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports
 import { CurrencyAmount, Token, ChainId as UniswapSDKChainId } from '@uniswap/sdk-core'
 import type { ImageSourcePropType } from 'react-native'
@@ -27,33 +28,41 @@ export enum UniverseChainId {
   WorldChain = UniswapSDKChainId.WORLDCHAIN,
   Zksync = UniswapSDKChainId.ZKSYNC,
   Zora = UniswapSDKChainId.ZORA,
+  Zephyr = Number(process.env.REACT_APP_CUSTOM_NETWORK_CHAIN_ID) || 1417429182,
 }
 
 export const SUPPORTED_CHAIN_IDS: UniverseChainId[] = [
   UniverseChainId.Mainnet,
-  UniverseChainId.Unichain,
-  UniverseChainId.Polygon,
-  UniverseChainId.ArbitrumOne,
-  UniverseChainId.Optimism,
-  UniverseChainId.Base,
-  UniverseChainId.Bnb,
-  UniverseChainId.Blast,
-  UniverseChainId.Avalanche,
-  UniverseChainId.Celo,
-  UniverseChainId.WorldChain,
-  UniverseChainId.Soneium,
-  UniverseChainId.Zora,
-  UniverseChainId.Zksync,
+  UniverseChainId.Zephyr,
 ]
 
 export const SUPPORTED_TESTNET_CHAIN_IDS: UniverseChainId[] = [
-  UniverseChainId.Sepolia,
-  UniverseChainId.UnichainSepolia,
   UniverseChainId.MonadTestnet,
+  UniverseChainId.UnichainSepolia,
+  UniverseChainId.Zephyr,
 ]
 
 // This order is used as a fallback for chain ordering but will otherwise defer to useOrderedChainIds
-export const ALL_CHAIN_IDS: UniverseChainId[] = [...SUPPORTED_CHAIN_IDS, ...SUPPORTED_TESTNET_CHAIN_IDS]
+export const ALL_CHAIN_IDS: UniverseChainId[] = [
+  UniverseChainId.Mainnet,
+  UniverseChainId.ArbitrumOne,
+  UniverseChainId.Avalanche,
+  UniverseChainId.Base,
+  UniverseChainId.Blast,
+  UniverseChainId.Bnb,
+  UniverseChainId.Celo,
+  UniverseChainId.MonadTestnet,
+  UniverseChainId.Optimism,
+  UniverseChainId.Polygon,
+  UniverseChainId.Sepolia,
+  UniverseChainId.Soneium,
+  UniverseChainId.Unichain,
+  UniverseChainId.UnichainSepolia,
+  UniverseChainId.WorldChain,
+  UniverseChainId.Zksync,
+  UniverseChainId.Zora,
+  UniverseChainId.Zephyr,
+]
 
 export interface EnabledChainsInfo {
   chains: UniverseChainId[]
