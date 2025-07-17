@@ -16,10 +16,9 @@ import { AlertTriangle, BookOpen, ChevronDown, ChevronsRight, Inbox, Layers } fr
 import { Link } from 'react-router-dom'
 import { useUserHideClosedPositions } from 'state/user/hooks'
 import styled, { css, useTheme } from 'styled-components'
-import { HideSmall, ThemedText } from 'theme/components'
+import { ThemedText } from 'theme/components'
 import { PositionDetails } from 'types/position'
 
-import CTACards from './CTACards'
 import { LoadingRows } from './styled'
 
 const PageWrapper = styled(AutoColumn)`
@@ -315,9 +314,6 @@ export default function Pool() {
                 </ErrorContainer>
               )}
             </MainContentWrapper>
-            <HideSmall>
-              <CTACards />
-            </HideSmall>
           </AutoColumn>
         </AutoColumn>
       </PageWrapper>

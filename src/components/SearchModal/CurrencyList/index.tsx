@@ -1,6 +1,4 @@
 import { Currency } from '@uniswap/sdk-core'
-import TokenSafetyIcon from 'components/TokenSafety/TokenSafetyIcon'
-import { checkWarning } from 'constants/tokenSafety'
 import { CSSProperties, MutableRefObject, useCallback, useMemo } from 'react'
 import { Check } from 'react-feather'
 import { FixedSizeList } from 'react-window'
@@ -45,10 +43,6 @@ const Tag = styled.div`
   white-space: nowrap;
   justify-self: flex-end;
   margin-right: 4px;
-`
-
-const WarningContainer = styled.div`
-  margin-left: 0.3em;
 `
 
 const TagContainer = styled.div`
@@ -101,9 +95,19 @@ export function CurrencyRow({
   showCurrencyAmount?: boolean
 }) {
   const key = currencyKey(currency)
-  const warning = currency.isNative ? null : checkWarning(currency.address)
-  const isBlockedToken = !!warning && !warning.canProceed
-  const blockedTokenOpacity = '0.6'
+
+  // Debug click handler for USDC
+  const handleClick = () => {
+    if (currency.symbol === 'USDC') {
+      console.log('[CurrencyRow USDC Click]', {
+        symbol: currency.symbol,
+        isSelected,
+        otherSelected,
+        willCall: !isSelected ? 'onSelect(false)' : 'null (blocked)',
+      })
+    }
+    return isSelected ? null : onSelect(false)
+  }
 
   // only show add or remove buttons if not on selected list
   return (
@@ -111,21 +115,17 @@ export function CurrencyRow({
       tabIndex={0}
       style={style}
       className={`token-item-${key}`}
-      onKeyPress={(e) => (!isSelected && e.key === 'Enter' ? onSelect(!!warning) : null)}
-      onClick={() => (isSelected ? null : onSelect(!!warning))}
+      onKeyPress={(e) => (!isSelected && e.key === 'Enter' ? onSelect(false) : null)}
+      onClick={handleClick}
       disabled={isSelected}
       selected={otherSelected}
-      dim={isBlockedToken}
     >
       <Column>
-        <CurrencyLogo currency={currency} size="36px" style={{ opacity: isBlockedToken ? blockedTokenOpacity : '1' }} />
+        <CurrencyLogo currency={currency} size="36px" />
       </Column>
-      <AutoColumn style={{ opacity: isBlockedToken ? blockedTokenOpacity : '1' }}>
+      <AutoColumn>
         <Row>
           <CurrencyName title={currency.name}>{currency.name}</CurrencyName>
-          <WarningContainer>
-            <TokenSafetyIcon warning={warning} />
-          </WarningContainer>
         </Row>
         <ThemedText.LabelMicro ml="0px">{currency.symbol}</ThemedText.LabelMicro>
       </AutoColumn>
@@ -187,7 +187,30 @@ export default function CurrencyList({
 
       const isSelected = Boolean(currency && selectedCurrency && selectedCurrency.equals(currency))
       const otherSelected = Boolean(currency && otherCurrency && otherCurrency.equals(currency))
-      const handleSelect = (hasWarning: boolean) => currency && onCurrencySelect(currency, hasWarning)
+      const handleSelect = (hasWarning: boolean) => {
+        if (currency?.symbol === 'USDC') {
+          console.log('[CurrencyList handleSelect USDC]', {
+            symbol: currency.symbol,
+            hasWarning,
+            willCall: currency ? 'onCurrencySelect' : 'blocked (no currency)',
+          })
+        }
+        return currency && onCurrencySelect(currency, hasWarning)
+      }
+
+      // Debug logging for USDC selection issue
+      if (currency?.symbol === 'USDC') {
+        console.log('[CurrencyRow USDC Debug]', {
+          symbol: currency.symbol,
+          address: 'address' in currency ? currency.address : 'N/A',
+          isSelected,
+          otherSelected,
+          selectedCurrency: selectedCurrency?.symbol,
+          selectedCurrencyAddress: selectedCurrency && 'address' in selectedCurrency ? selectedCurrency.address : 'N/A',
+          otherCurrency: otherCurrency?.symbol,
+          otherCurrencyAddress: otherCurrency && 'address' in otherCurrency ? otherCurrency.address : 'N/A',
+        })
+      }
 
       if (currency) {
         return (

@@ -18,7 +18,7 @@ import polygonMaticLogo from 'assets/svg/polygon-matic-logo.svg'
 import ms from 'ms'
 import { darkTheme } from 'theme/colors'
 
-import { SupportedL1ChainId, SupportedL2ChainId } from './chains'
+import { SupportedL1ChainId, SupportedL2ChainId, ZEPHYR_CHAIN_ID } from './chains'
 import { ARBITRUM_LIST, AVALANCHE_LIST, BASE_LIST, CELO_LIST, OPTIMISM_LIST, PLASMA_BNB_LIST } from './lists'
 
 export const AVERAGE_L1_BLOCK_TIME = ms(`12s`)
@@ -259,6 +259,17 @@ const CHAIN_INFO: ChainInfoMap = {
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     color: darkTheme.chain_84531,
   },
+  [ZEPHYR_CHAIN_ID]: {
+    networkType: NetworkType.L1,
+    blockWaitMsBeforeWarning: ms(`10m`),
+    docs: 'https://docs.zephyr.network/', // TODO: from env vars?
+    explorer: 'https://zephyr-blockscout.eu-north-2.gateway.fm',
+    infoLink: 'https://info.uniswap.org/#/zephyr/',
+    label: 'Zephyr',
+    logoUrl: ethereumLogoUrl, // TODO: Add Zephyr logo
+    nativeCurrency: { name: 'Zero', symbol: 'ZERO', decimals: 18 },
+    color: darkTheme.chain_1,
+  },
 } as const
 
 export function getChainInfo(chainId: SupportedL1ChainId): L1ChainInfo
@@ -283,7 +294,7 @@ export function getChainInfo(chainId: any): any {
   return undefined
 }
 
-const MAINNET_INFO = CHAIN_INFO[ChainId.MAINNET]
+const ZEPHYR_INFO = CHAIN_INFO[ZEPHYR_CHAIN_ID]
 export function getChainInfoOrDefault(chainId: number | undefined) {
-  return getChainInfo(chainId) ?? MAINNET_INFO
+  return getChainInfo(chainId) ?? ZEPHYR_INFO
 }

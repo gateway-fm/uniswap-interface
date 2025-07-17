@@ -1,6 +1,5 @@
 import { Trans } from '@lingui/macro'
 import { ChainId, Currency, CurrencyAmount, Percent, Token } from '@uniswap/sdk-core'
-import { UNIVERSAL_ROUTER_ADDRESS } from '@uniswap/universal-router-sdk'
 import { useWeb3React } from '@web3-react/core'
 import { useToggleAccountDrawer } from 'components/AccountDrawer'
 import AddressInputPanel from 'components/AddressInputPanel'
@@ -20,8 +19,9 @@ import SwapHeader from 'components/swap/SwapHeader'
 import { SwitchLocaleLink } from 'components/SwitchLocaleLink'
 import TokenSafetyModal from 'components/TokenSafety/TokenSafetyModal'
 import { useConnectionReady } from 'connection/eagerlyConnect'
+import { getUniversalRouterAddress } from 'constants/addresses'
 import { getChainInfo } from 'constants/chainInfo'
-import { asSupportedChain, isSupportedChain } from 'constants/chains'
+import { asSupportedChain, isSupportedChain, ZEPHYR_CHAIN_ID } from 'constants/chains'
 import { getSwapCurrencyId, TOKEN_SHORTHANDS } from 'constants/tokens'
 import { useCurrency, useDefaultActiveTokens } from 'hooks/Tokens'
 import { useIsSwapUnsupported } from 'hooks/useIsSwapUnsupported'
@@ -51,6 +51,9 @@ import { maxAmountSpend } from 'utils/maxAmountSpend'
 import { computeRealizedPriceImpact, warningSeverity } from 'utils/prices'
 import { didUserReject } from 'utils/swapErrorToUserReadableMessage'
 
+import { TokenDebugInfo } from '../../components/TokenDebugInfo'
+import { useZephyrDataPreloader } from '../../hooks/useZephyrData'
+import { useZephyrDefaultToken } from '../../hooks/useZephyrDefaults'
 import { useIsDarkMode } from '../../theme/components/ThemeToggle'
 import { OutputTaxTooltipBody } from './TaxTooltipBody'
 
@@ -129,24 +132,40 @@ function largerPercentValue(a?: Percent, b?: Percent) {
 export default function SwapPage({ className }: { className?: string }) {
   const { chainId: connectedChainId } = useWeb3React()
   const loadedUrlParams = useDefaultsFromURLSearch()
+  const zephyrDefaultToken = useZephyrDefaultToken()
+
+  // Preload Zephyr data (pools and tokens)
+  useZephyrDataPreloader()
 
   const location = useLocation()
 
   const supportedChainId = asSupportedChain(connectedChainId)
 
+  // For Zephyr network, use GraphQL token as default if no URL params
+  const inputCurrencyId = useMemo(() => {
+    if (loadedUrlParams?.[Field.INPUT]?.currencyId) {
+      return loadedUrlParams[Field.INPUT].currencyId
+    }
+    if (supportedChainId === ZEPHYR_CHAIN_ID && zephyrDefaultToken) {
+      return zephyrDefaultToken
+    }
+    return undefined
+  }, [loadedUrlParams, supportedChainId, zephyrDefaultToken])
+
   return (
     <>
       <PageWrapper>
+        {process.env.NODE_ENV === 'development' && <TokenDebugInfo />}
         <Swap
           className={className}
-          chainId={supportedChainId ?? ChainId.MAINNET}
-          initialInputCurrencyId={loadedUrlParams?.[Field.INPUT]?.currencyId}
+          chainId={(supportedChainId ?? ChainId.MAINNET) as ChainId}
+          initialInputCurrencyId={inputCurrencyId}
           initialOutputCurrencyId={loadedUrlParams?.[Field.OUTPUT]?.currencyId}
           disableTokenInputs={supportedChainId === undefined}
         />
         <NetworkAlert />
       </PageWrapper>
-      {location.pathname === '/swap' && <SwitchLocaleLink />}
+      {(location.pathname === '/swap' || location.pathname === '/') && <SwitchLocaleLink />}
     </>
   )
 }
@@ -407,7 +426,7 @@ function Swap({
       (parsedAmounts[Field.INPUT]?.currency.isToken
         ? (parsedAmounts[Field.INPUT] as CurrencyAmount<Token>)
         : undefined),
-    isSupportedChain(chainId) ? UNIVERSAL_ROUTER_ADDRESS(chainId) : undefined,
+    isSupportedChain(chainId) ? getUniversalRouterAddress(chainId) : undefined,
     trade?.fillType
   )
 

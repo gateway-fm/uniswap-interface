@@ -5,6 +5,7 @@
 /src/types/v3
 /src/abis/types
 /src/locales/**/*.js
+/src/locales/**/*.mjs
 /src/locales/**/*.po
 
 # generated files
@@ -22,6 +23,13 @@
 # builds
 /build
 /dts
+
+# from the future
+/apps/web
+/packages
+.turbo
+/.yarn
+/dist
 
 # misc
 .DS_Store
