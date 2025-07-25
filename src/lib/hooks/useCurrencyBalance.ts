@@ -7,6 +7,7 @@ import JSBI from 'jsbi'
 import { useMultipleContractSingleData, useSingleContractMultipleData } from 'lib/hooks/multicall'
 import { useMemo } from 'react'
 
+import { ZEPHYR_CHAIN_ID } from '../../constants/chains'
 import { nativeOnChain } from '../../constants/tokens'
 import { useInterfaceMulticall } from '../../hooks/useContract'
 import { isAddress } from '../../utils'
@@ -63,12 +64,15 @@ export function useTokenBalancesWithLoadingIndicator(
   )
   const validatedTokenAddresses = useMemo(() => validatedTokens.map((vt) => vt.address), [validatedTokens])
 
+  // Skip multicall for Zephyr network since it doesn't support it
+  const isZephyrNetwork = chainId === ZEPHYR_CHAIN_ID
+
   const balances = useMultipleContractSingleData(
     validatedTokenAddresses,
     ERC20Interface,
     'balanceOf',
     useMemo(() => [address], [address]),
-    tokenBalancesGasRequirement
+    isZephyrNetwork ? { gasRequired: 0 } : tokenBalancesGasRequirement // Skip for Zephyr
   )
 
   const anyLoading: boolean = useMemo(() => balances.some((callState) => callState.loading), [balances])
@@ -105,7 +109,7 @@ export function useTokenBalance(account?: string, token?: Token): CurrencyAmount
     useMemo(() => [token], [token])
   )
   if (!token) return undefined
-  return tokenBalances[token.address]
+  return tokenBalances[token.address.toLowerCase()]
 }
 
 export function useCurrencyBalances(
@@ -126,7 +130,7 @@ export function useCurrencyBalances(
     () =>
       currencies?.map((currency) => {
         if (!account || !currency || currency.chainId !== chainId) return undefined
-        if (currency.isToken) return tokenBalances[currency.address]
+        if (currency.isToken) return tokenBalances[currency.address.toLowerCase()]
         if (currency.isNative) return ethBalance[account]
         return undefined
       }) ?? [],

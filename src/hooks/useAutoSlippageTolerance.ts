@@ -1,6 +1,4 @@
 import { Percent } from '@uniswap/sdk-core'
-import { useWeb3React } from '@web3-react/core'
-import { L2_CHAIN_IDS } from 'constants/chains'
 import { useMemo } from 'react'
 import { ClassicTrade } from 'state/routing/types'
 
@@ -18,8 +16,7 @@ const MAX_AUTO_SLIPPAGE_TOLERANCE = new Percent(5, 100) // 5%
  * Auto slippage is only relevant for Classic swaps because UniswapX slippage is determined by the backend service
  */
 export default function useClassicAutoSlippageTolerance(trade?: ClassicTrade): Percent {
-  const { chainId } = useWeb3React()
-  const onL2 = chainId && L2_CHAIN_IDS.includes(chainId)
+  const onL2 = false // Zephyr is L1, so always false
   const outputDollarValue = useStablecoinValue(trade?.outputAmount)
 
   const gasEstimateUSD = useStablecoinAmountFromFiatValue(trade?.gasUseEstimateUSD) ?? null

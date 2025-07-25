@@ -15,6 +15,7 @@
     "start": "craco start",
     "start:cloud": "NODE_OPTIONS=--dns-result-order=ipv4first PORT=3001 npx wrangler pages dev --compatibility-flags=nodejs_compat --compatibility-date=2023-08-01 --proxy=3001 --port=3000 -- yarn start",
     "build": "craco build",
+    "build:production": "yarn prepare && yarn build",
     "analyze": "source-map-explorer 'build/static/js/*.js' --no-border-checks --gzip",
     "serve": "serve build -s -l 3000",
     "lint": "yarn eslint --ignore-path .gitignore --cache --cache-location node_modules/.cache/eslint/ .",
@@ -26,12 +27,14 @@
     "cypress:open": "cypress open --browser chrome --e2e",
     "cypress:run": "cypress run --browser chrome --e2e",
     "deduplicate": "yarn-deduplicate --strategy=highest",
-    "postinstall": "yarn patch-package"
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged"
-    }
+    "postinstall": "yarn patch-package",
+    "docker:build": "docker buildx build --platform linux/amd64 --load -t nekrasovgfm/zephyr-dex:latest .",
+    "docker:build:native": "docker build -t nekrasovgfm/zephyr-dex:native .",
+    "docker:run": "docker run --rm -p 3000:3000 nekrasovgfm/zephyr-dex:latest",
+    "docker:run:native": "docker run --rm -p 3000:3000 nekrasovgfm/zephyr-dex:native",
+    "docker:push": "docker push nekrasovgfm/zephyr-dex:latest",
+    "docker:build:multi": "docker buildx build --platform linux/amd64,linux/arm64 -t nekrasovgfm/zephyr-dex:latest --push .",
+    "docker:build:aws": "docker build --platform linux/amd64 -t nekrasovgfm/zephyr-dex:latest ."
   },
   "lint-staged": {
     "yarn.lock": [
@@ -125,7 +128,6 @@
     "eslint-plugin-import": "^2.27",
     "eslint-plugin-rulesdir": "^0.2.2",
     "hardhat": "^2.14.0",
-    "husky": "^8.0.3",
     "jest": "^29.6.1",
     "jest-extended": "^4.0.1",
     "jest-fail-on-console": "^3.1.1",
@@ -274,9 +276,10 @@
     "zustand": "^4.3.6"
   },
   "engines": {
-    "npm": "please-use-yarn",
-    "node": "18.x",
-    "yarn": ">=1.22"
+    "node": ">=18.0.0",
+    "yarn": ">=1.22.0",
+    "npm": "please-use-yarn"
   },
-  "homepage": "./"
+  "packageManager": "yarn@1.22.0",
+  "homepage": "/"
 }

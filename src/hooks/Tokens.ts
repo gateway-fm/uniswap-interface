@@ -9,10 +9,12 @@ import { useMemo } from 'react'
 import { useAppSelector } from 'state/hooks'
 import { isL2ChainId } from 'utils/chains'
 
+import { ZEPHYR_CHAIN_ID } from '../constants/chains'
 import { useAllLists, useCombinedActiveList, useCombinedTokenMapFromUrls } from '../state/lists/hooks'
 import { WrappedTokenInfo } from '../state/lists/wrappedTokenInfo'
 import { deserializeToken, useUserAddedTokens } from '../state/user/hooks'
 import { useUnsupportedTokenList } from './../state/lists/hooks'
+import { useZephyrTokens } from './useZephyrTokens'
 
 type Maybe<T> = T | null | undefined
 
@@ -22,7 +24,9 @@ function useTokensFromMap(tokenMap: TokenAddressMap, chainId: Maybe<ChainId>): {
     if (!chainId) return {}
 
     // reduce to just tokens
-    return Object.keys(tokenMap[chainId] ?? {}).reduce<{ [address: string]: Token }>((newMap, address) => {
+    return Object.keys(tokenMap[chainId] ?? {}).reduce<{
+      [address: string]: Token
+    }>((newMap, address) => {
       newMap[address] = tokenMap[chainId][address].token
       return newMap
     }, {})
@@ -30,7 +34,9 @@ function useTokensFromMap(tokenMap: TokenAddressMap, chainId: Maybe<ChainId>): {
 }
 
 // TODO(WEB-2347): after disallowing unchecked index access, refactor ChainTokenMap to not use ?'s
-export type ChainTokenMap = { [chainId in number]?: { [address in string]?: Token } }
+export type ChainTokenMap = {
+  [chainId in number]?: { [address in string]?: Token }
+}
 /** Returns tokens from all token lists on all chains, combined with user added tokens */
 export function useAllTokensMultichain(): ChainTokenMap {
   const allTokensFromLists = useCombinedTokenMapFromUrls(DEFAULT_LIST_OF_LISTS)
@@ -64,25 +70,37 @@ export function useAllTokensMultichain(): ChainTokenMap {
 }
 
 /** Returns all tokens from the default list + user added tokens */
-export function useDefaultActiveTokens(chainId: Maybe<ChainId>): { [address: string]: Token } {
+export function useDefaultActiveTokens(chainId: Maybe<ChainId>): {
+  [address: string]: Token
+} {
   const defaultListTokens = useCombinedActiveList()
   const tokensFromMap = useTokensFromMap(defaultListTokens, chainId)
   const userAddedTokens = useUserAddedTokens()
+
+  const zephyrTokens = useZephyrTokens()
+
   return useMemo(() => {
-    return (
-      userAddedTokens
-        // reduce into all ALL_TOKENS filtered by the current chain
-        .reduce<{ [address: string]: Token }>(
-          (tokenMap, token) => {
-            tokenMap[token.address] = token
-            return tokenMap
-          },
-          // must make a copy because reduce modifies the map, and we do not
-          // want to make a copy in every iteration
-          { ...tokensFromMap }
-        )
-    )
-  }, [tokensFromMap, userAddedTokens])
+    let baseTokens = { ...tokensFromMap }
+
+    // For Zephyr network, merge GraphQL tokens
+    if (chainId && chainId === (ZEPHYR_CHAIN_ID as number)) {
+      baseTokens = { ...baseTokens, ...zephyrTokens }
+    }
+
+    const result = userAddedTokens
+      // reduce into all ALL_TOKENS filtered by the current chain
+      .reduce<{ [address: string]: Token }>(
+        (tokenMap, token) => {
+          tokenMap[token.address] = token
+          return tokenMap
+        },
+        // must make a copy because reduce modifies the map, and we do not
+        // want to make a copy in every iteration
+        baseTokens
+      )
+
+    return result
+  }, [tokensFromMap, userAddedTokens, chainId, zephyrTokens])
 }
 
 type BridgeInfo = Record<
@@ -110,7 +128,10 @@ export function useUnsupportedTokens(): { [address: string]: Token } {
       return {}
     }
 
-    const listUrl = getChainInfo(chainId).defaultListUrl
+    const listUrl = getChainInfo(chainId)?.defaultListUrl
+    if (!listUrl) {
+      return {}
+    }
 
     const list = listsByUrl[listUrl]?.current
     if (!list) {
@@ -119,7 +140,7 @@ export function useUnsupportedTokens(): { [address: string]: Token } {
 
     const unsupportedSet = new Set(Object.keys(unsupportedTokens))
 
-    return list.tokens.reduce((acc, tokenInfo) => {
+    return list.tokens.reduce((acc: { [address: string]: Token }, tokenInfo: any) => {
       const bridgeInfo = tokenInfo.extensions?.bridgeInfo as unknown as BridgeInfo
       if (
         bridgeInfo &&
@@ -129,7 +150,10 @@ export function useUnsupportedTokens(): { [address: string]: Token } {
       ) {
         const address = bridgeInfo[ChainId.MAINNET].tokenAddress
         // don't rely on decimals--it's possible that a token could be bridged w/ different decimals on the L2
-        return { ...acc, [address]: new Token(ChainId.MAINNET, address, tokenInfo.decimals) }
+        return {
+          ...acc,
+          [address]: new Token(ChainId.MAINNET, address, tokenInfo.decimals),
+        }
       }
       return acc
     }, {})
@@ -190,8 +214,41 @@ export function useToken(tokenAddress?: string | null): Token | null | undefined
   return useTokenFromMapOrNetwork(tokens, tokenAddress)
 }
 
-export function useCurrency(currencyId: Maybe<string>, chainId?: ChainId): Currency | undefined {
+/**
+ * Returns a Currency from the currencyId.
+ * Returns null if currency is loading or null was passed.
+ * Returns undefined if currencyId is invalid or token does not exist.
+ */
+export function useCurrency(currencyId: string | null | undefined, chainId?: ChainId): Currency | undefined {
   const { chainId: connectedChainId } = useWeb3React()
-  const tokens = useDefaultActiveTokens(chainId ?? connectedChainId)
-  return useCurrencyFromMap(tokens, chainId ?? connectedChainId, currencyId)
+  const currentChainId = chainId ?? connectedChainId
+  const chainIdToUse = currentChainId ?? ChainId.MAINNET
+
+  // Always call all hooks
+  const zephyrTokens = useZephyrTokens()
+  const tokens = useDefaultActiveTokens(chainIdToUse)
+  const standardResult = useCurrencyFromMap(tokens, chainIdToUse, currencyId)
+
+  // For Zephyr network, use only GraphQL tokens (no native currency support)
+  if (currentChainId === ZEPHYR_CHAIN_ID) {
+    if (!currencyId) return undefined
+
+    // Look up token in GraphQL tokens by address or symbol
+    const tokenByAddress = Object.values(zephyrTokens).find(
+      (token) => token.address.toLowerCase() === currencyId.toLowerCase()
+    )
+
+    if (tokenByAddress) return tokenByAddress
+
+    // Look up by symbol (for legacy URL support)
+    const tokenBySymbol = Object.values(zephyrTokens).find(
+      (token) => token.symbol?.toLowerCase() === currencyId.toLowerCase()
+    )
+
+    if (tokenBySymbol) return tokenBySymbol
+    return undefined
+  }
+
+  // For other networks, use standard logic
+  return standardResult
 }

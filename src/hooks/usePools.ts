@@ -4,11 +4,14 @@ import IUniswapV3PoolStateJSON from '@uniswap/v3-core/artifacts/contracts/interf
 import { computePoolAddress } from '@uniswap/v3-sdk'
 import { FeeAmount, Pool } from '@uniswap/v3-sdk'
 import { useWeb3React } from '@web3-react/core'
+import { ZEPHYR_CHAIN_ID } from 'constants/chains'
+import { getZephyrPoolParams } from 'constants/zephyr'
 import JSBI from 'jsbi'
 import { useMultipleContractSingleData } from 'lib/hooks/multicall'
 import { useMemo } from 'react'
 
 import { IUniswapV3PoolStateInterface } from '../types/v3/IUniswapV3PoolState'
+import { useTopPools } from './useProtocolStats'
 
 const POOL_STATE_INTERFACE = new Interface(IUniswapV3PoolStateJSON.abi) as IUniswapV3PoolStateInterface
 
@@ -86,21 +89,32 @@ function usePools(
   poolKeys: [Currency | undefined, Currency | undefined, FeeAmount | undefined][]
 ): [PoolState, Pool | null][] {
   const { chainId } = useWeb3React()
+  const isZephyrNetwork = chainId === ZEPHYR_CHAIN_ID
+
+  // Only fetch GraphQL pools when we actually need them for Zephyr network
+  const shouldFetchGraphQL = useMemo(() => {
+    return isZephyrNetwork && poolKeys.some(([currencyA, currencyB]) => currencyA && currencyB)
+  }, [isZephyrNetwork, poolKeys])
+
+  const { pools: graphqlPools, loading: graphqlLoading } = useTopPools(shouldFetchGraphQL ? 100 : 0)
 
   const poolTokens: ([Token, Token, FeeAmount] | undefined)[] = useMemo(() => {
     if (!chainId) return new Array(poolKeys.length)
 
     return poolKeys.map(([currencyA, currencyB, feeAmount]) => {
-      if (currencyA && currencyB && feeAmount) {
+      // For Zephyr network, use 1% fee ONLY if not specified
+      const actualFeeAmount = feeAmount ?? (isZephyrNetwork ? FeeAmount.HIGH : undefined)
+
+      if (currencyA && currencyB && actualFeeAmount) {
         const tokenA = currencyA.wrapped
         const tokenB = currencyB.wrapped
         if (tokenA.equals(tokenB)) return undefined
 
-        return tokenA.sortsBefore(tokenB) ? [tokenA, tokenB, feeAmount] : [tokenB, tokenA, feeAmount]
+        return tokenA.sortsBefore(tokenB) ? [tokenA, tokenB, actualFeeAmount] : [tokenB, tokenA, actualFeeAmount]
       }
       return undefined
     })
-  }, [chainId, poolKeys])
+  }, [chainId, poolKeys, isZephyrNetwork])
 
   const poolAddresses: (string | undefined)[] = useMemo(() => {
     const v3CoreFactoryAddress = chainId && V3_CORE_FACTORY_ADDRESSES[chainId]
@@ -109,8 +123,21 @@ function usePools(
     return poolTokens.map((value) => value && PoolCache.getPoolAddress(v3CoreFactoryAddress, ...value))
   }, [chainId, poolTokens])
 
-  const slot0s = useMultipleContractSingleData(poolAddresses, POOL_STATE_INTERFACE, 'slot0')
-  const liquidities = useMultipleContractSingleData(poolAddresses, POOL_STATE_INTERFACE, 'liquidity')
+  // Skip multicall for Zephyr network
+  const slot0s = useMultipleContractSingleData(
+    isZephyrNetwork ? [] : poolAddresses,
+    POOL_STATE_INTERFACE,
+    'slot0',
+    undefined,
+    { gasRequired: isZephyrNetwork ? 0 : undefined }
+  )
+  const liquidities = useMultipleContractSingleData(
+    isZephyrNetwork ? [] : poolAddresses,
+    POOL_STATE_INTERFACE,
+    'liquidity',
+    undefined,
+    { gasRequired: isZephyrNetwork ? 0 : undefined }
+  )
 
   return useMemo(() => {
     return poolKeys.map((_key, index) => {
@@ -118,6 +145,61 @@ function usePools(
       if (!tokens) return [PoolState.INVALID, null]
       const [token0, token1, fee] = tokens
 
+      // For Zephyr network, use GraphQL data
+      if (isZephyrNetwork) {
+        if (graphqlLoading) return [PoolState.LOADING, null]
+
+        // Find matching pool in GraphQL data by tokens AND fee tier
+        const graphqlPool = graphqlPools?.find((pool) => {
+          const pool0Address = pool.token0.id.toLowerCase()
+          const pool1Address = pool.token1.id.toLowerCase()
+          const token0Address = token0.address.toLowerCase()
+          const token1Address = token1.address.toLowerCase()
+
+          // Check tokens match
+          const tokensMatch =
+            (pool0Address === token0Address && pool1Address === token1Address) ||
+            (pool0Address === token1Address && pool1Address === token0Address)
+
+          // For fee matching, convert GraphQL feeTier to number and compare
+          // NOTE: GraphQL sometimes returns string like "3000" or "10000"
+          const poolFee = typeof pool.feeTier === 'string' ? parseInt(pool.feeTier, 10) : pool.feeTier
+          const feeMatches = poolFee === fee
+
+          return tokensMatch && feeMatches
+        })
+
+        try {
+          if (graphqlPool) {
+            // Pool exists in GraphQL - create with proper 1:1 price accounting for decimals
+            // Use the actual fee amount (could be 3000 for old positions or 10000 for new ones)
+            const { sqrtPriceX96, tick, liquidity } = getZephyrPoolParams(token0, token1)
+            const pool = new Pool(token0, token1, fee, sqrtPriceX96, liquidity, tick) // Use fee from tokens instead of hardcoded FeeAmount.HIGH
+            return [PoolState.EXISTS, pool]
+          } else {
+            // Pool doesn't exist in GraphQL but we have valid tokens and fee
+            // Create mock pool for existing positions that may not be in GraphQL yet
+            try {
+              const { sqrtPriceX96, tick, liquidity } = getZephyrPoolParams(token0, token1)
+              const mockPool = new Pool(token0, token1, fee, sqrtPriceX96, liquidity, tick)
+              console.log('Created mock pool for existing position:', {
+                token0: token0.symbol,
+                token1: token1.symbol,
+                fee,
+              })
+              return [PoolState.EXISTS, mockPool]
+            } catch (error) {
+              console.error('Error creating mock pool:', error)
+              return [PoolState.NOT_EXISTS, null]
+            }
+          }
+        } catch (error) {
+          console.error('Error when constructing Zephyr pool', error)
+          return [PoolState.NOT_EXISTS, null]
+        }
+      }
+
+      // Original logic for non-Zephyr networks
       if (!slot0s[index]) return [PoolState.INVALID, null]
       const { result: slot0, loading: slot0Loading, valid: slot0Valid } = slot0s[index]
 
@@ -137,7 +219,7 @@ function usePools(
         return [PoolState.NOT_EXISTS, null]
       }
     })
-  }, [liquidities, poolKeys, slot0s, poolTokens])
+  }, [liquidities, poolKeys, slot0s, poolTokens, isZephyrNetwork, graphqlPools, graphqlLoading])
 }
 
 export function usePool(

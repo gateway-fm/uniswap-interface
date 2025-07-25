@@ -5,10 +5,10 @@ import RouterLabel from 'components/RouterLabel'
 import Row, { RowBetween } from 'components/Row'
 import { MouseoverTooltip, TooltipSize } from 'components/Tooltip'
 import { getChainInfo } from 'constants/chainInfo'
-import { SUPPORTED_GAS_ESTIMATE_CHAIN_IDS } from 'constants/chains'
+import { ZEPHYR_CHAIN_ID } from 'constants/chains'
 import useHoverProps from 'hooks/useHoverProps'
 import { useIsMobile } from 'nft/hooks'
-import React, { PropsWithChildren } from 'react'
+import React, { PropsWithChildren, useMemo } from 'react'
 import { InterfaceTrade } from 'state/routing/types'
 import { isPreviewTrade } from 'state/routing/utils'
 import { useUserSlippageTolerance } from 'state/user/hooks'
@@ -104,6 +104,15 @@ function useLineItem(props: SwapLineItemProps): LineItemData | undefined {
   const isPreview = isPreviewTrade(trade)
   const chainId = trade.inputAmount.currency.chainId
 
+  // For Zephyr network, use minimal price impact instead of calculated trade.priceImpact
+  // TODO: Remove this once we have a proper API
+  const zephyrMinimalPriceImpact = useMemo(() => {
+    if (chainId === ZEPHYR_CHAIN_ID) {
+      return new Percent(1, 10000) // 0.01%
+    }
+    return null
+  }, [chainId])
+
   switch (type) {
     case SwapLineItemType.EXCHANGE_RATE:
       return {
@@ -113,7 +122,7 @@ function useLineItem(props: SwapLineItemProps): LineItemData | undefined {
         tooltipSize: TooltipSize.Small,
       }
     case SwapLineItemType.NETWORK_COST:
-      if (!SUPPORTED_GAS_ESTIMATE_CHAIN_IDS.includes(chainId)) return
+      if (chainId !== ZEPHYR_CHAIN_ID) return
       return {
         Label: () => <Trans>Network cost</Trans>,
         TooltipBody: () => <GasBreakdownTooltip trade={trade} />,
@@ -131,7 +140,12 @@ function useLineItem(props: SwapLineItemProps): LineItemData | undefined {
       return {
         Label: () => <Trans>Price impact</Trans>,
         TooltipBody: () => <Trans>The impact your trade has on the market price of this pool.</Trans>,
-        Value: () => (isPreview ? <Loading /> : <ColoredPercentRow percent={trade.priceImpact} />),
+        Value: () => {
+          if (isPreview) return <Loading />
+          // For Zephyr network, use minimal price impact
+          const priceImpact = zephyrMinimalPriceImpact || trade.priceImpact
+          return <ColoredPercentRow percent={priceImpact} />
+        },
       }
     case SwapLineItemType.MAX_SLIPPAGE:
       return {

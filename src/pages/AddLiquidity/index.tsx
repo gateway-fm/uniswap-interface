@@ -1,15 +1,17 @@
 import { BigNumber } from '@ethersproject/bignumber'
-import type { TransactionResponse } from '@ethersproject/providers'
+import { Contract } from '@ethersproject/contracts'
 import { Trans } from '@lingui/macro'
-import { Currency, CurrencyAmount, NONFUNGIBLE_POSITION_MANAGER_ADDRESSES, Percent } from '@uniswap/sdk-core'
-import { FeeAmount, NonfungiblePositionManager } from '@uniswap/v3-sdk'
+import { Currency, CurrencyAmount, Percent } from '@uniswap/sdk-core'
+import { FeeAmount } from '@uniswap/v3-sdk'
+import { NonfungiblePositionManager } from '@uniswap/v3-sdk'
 import { useWeb3React } from '@web3-react/core'
 import { useToggleAccountDrawer } from 'components/AccountDrawer'
 import OwnershipWarning from 'components/addLiquidity/OwnershipWarning'
 import UnsupportedCurrencyFooter from 'components/swap/UnsupportedCurrencyFooter'
-import { isSupportedChain } from 'constants/chains'
+import { isSupportedChain, ZEPHYR_CHAIN_ID } from 'constants/chains'
 import usePrevious from 'hooks/usePrevious'
 import { useSingleCallResult } from 'lib/hooks/multicall'
+import { ApprovalState } from 'lib/hooks/useApproval'
 import { BodyWrapper } from 'pages/AppBody'
 import { PositionPageUnsupportedContent } from 'pages/Pool/PositionPage'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -25,7 +27,6 @@ import {
 import styled, { useTheme } from 'styled-components'
 import { ThemedText } from 'theme/components'
 import { addressesAreEquivalent } from 'utils/addressesAreEquivalent'
-import { WrongChainError } from 'utils/errors'
 
 import { ButtonError, ButtonLight, ButtonPrimary, ButtonText } from '../../components/Button'
 import { BlueCard, OutlineCard, YellowCard } from '../../components/Card'
@@ -41,10 +42,12 @@ import RateToggle from '../../components/RateToggle'
 import Row, { RowBetween, RowFixed } from '../../components/Row'
 import { SwitchLocaleLink } from '../../components/SwitchLocaleLink'
 import TransactionConfirmationModal, { ConfirmationModalContent } from '../../components/TransactionConfirmationModal'
+import { NONFUNGIBLE_POSITION_MANAGER_ADDRESSES } from '../../constants/addresses'
 import { ZERO_PERCENT } from '../../constants/misc'
 import { WRAPPED_NATIVE_CURRENCY } from '../../constants/tokens'
+import { calculateOneToOneSqrtPriceX96 } from '../../constants/zephyr'
 import { useCurrency } from '../../hooks/Tokens'
-import { ApprovalState, useApproveCallback } from '../../hooks/useApproveCallback'
+import { useApproveCallback } from '../../hooks/useApproveCallback'
 import { useArgentWalletContract } from '../../hooks/useArgentWalletContract'
 import { useV3NFTPositionManagerContract } from '../../hooks/useContract'
 import { useDerivedPositionInfo } from '../../hooks/useDerivedPositionInfo'
@@ -52,12 +55,11 @@ import { useIsSwapUnsupported } from '../../hooks/useIsSwapUnsupported'
 import { useStablecoinValue } from '../../hooks/useStablecoinPrice'
 import useTransactionDeadline from '../../hooks/useTransactionDeadline'
 import { useV3PositionFromTokenId } from '../../hooks/useV3Positions'
+import { useZephyrNFTOwner } from '../../hooks/useZephyrNFTOwner'
 import { Bound, Field } from '../../state/mint/v3/actions'
 import { useTransactionAdder } from '../../state/transactions/hooks'
-import { TransactionInfo, TransactionType } from '../../state/transactions/types'
+import { TransactionType } from '../../state/transactions/types'
 import { useUserSlippageToleranceWithDefault } from '../../state/user/hooks'
-import approveAmountCalldata from '../../utils/approveAmountCalldata'
-import { calculateGasMargin } from '../../utils/calculateGasMargin'
 import { currencyId } from '../../utils/currencyId'
 import { maxAmountSpend } from '../../utils/maxAmountSpend'
 import { Dots } from '../Pool/styled'
@@ -66,7 +68,9 @@ import { DynamicSection, MediumOnly, ResponsiveTwoColumns, ScrollablePage, Style
 
 const DEFAULT_ADD_IN_RANGE_SLIPPAGE_TOLERANCE = new Percent(50, 10_000)
 
-const StyledBodyWrapper = styled(BodyWrapper)<{ $hasExistingPosition: boolean }>`
+const StyledBodyWrapper = styled(BodyWrapper)<{
+  $hasExistingPosition: boolean
+}>`
   padding: ${({ $hasExistingPosition }) => ($hasExistingPosition ? '10px' : 0)};
   max-width: 640px;
 `
@@ -101,16 +105,18 @@ function AddLiquidity() {
   const positionManager = useV3NFTPositionManagerContract()
 
   // check for existing position if tokenId in url
-  const { position: existingPositionDetails, loading: positionLoading } = useV3PositionFromTokenId(
-    tokenId ? BigNumber.from(tokenId) : undefined
-  )
+  const parsedTokenId = useMemo(() => (tokenId ? BigNumber.from(tokenId) : undefined), [tokenId])
+  const { position: existingPositionDetails, loading: positionLoading } = useV3PositionFromTokenId(parsedTokenId)
   const hasExistingPosition = !!existingPositionDetails && !positionLoading
   const { position: existingPosition } = useDerivedPositionInfo(existingPositionDetails)
 
   // fee selection from url
+  // TODO: Remove mock fee once we have a proper API
   const feeAmount: FeeAmount | undefined =
     feeAmountFromUrl && Object.values(FeeAmount).includes(parseFloat(feeAmountFromUrl))
       ? parseFloat(feeAmountFromUrl)
+      : chainId === ZEPHYR_CHAIN_ID
+      ? FeeAmount.HIGH // TODO: change to MEDIUM once we have a proper API?
       : undefined
 
   const baseCurrency = useCurrency(currencyIdA)
@@ -176,29 +182,31 @@ function AddLiquidity() {
   }
 
   // get the max amounts user can add
-  const maxAmounts: { [field in Field]?: CurrencyAmount<Currency> } = [Field.CURRENCY_A, Field.CURRENCY_B].reduce(
-    (accumulator, field) => {
-      return {
-        ...accumulator,
-        [field]: maxAmountSpend(currencyBalances[field]),
-      }
-    },
-    {}
+  const maxAmounts: { [field in Field]?: CurrencyAmount<Currency> } = useMemo(
+    () =>
+      [Field.CURRENCY_A, Field.CURRENCY_B].reduce((accumulator, field) => {
+        return {
+          ...accumulator,
+          [field]: maxAmountSpend(currencyBalances[field]),
+        }
+      }, {}),
+    [currencyBalances]
   )
 
-  const atMaxAmounts: { [field in Field]?: CurrencyAmount<Currency> } = [Field.CURRENCY_A, Field.CURRENCY_B].reduce(
-    (accumulator, field) => {
-      return {
-        ...accumulator,
-        [field]: maxAmounts[field]?.equalTo(parsedAmounts[field] ?? '0'),
-      }
-    },
-    {}
+  const atMaxAmounts: { [field in Field]?: CurrencyAmount<Currency> } = useMemo(
+    () =>
+      [Field.CURRENCY_A, Field.CURRENCY_B].reduce((accumulator, field) => {
+        return {
+          ...accumulator,
+          [field]: maxAmounts[field]?.equalTo(parsedAmounts[field] ?? '0'),
+        }
+      }, {}),
+    [maxAmounts, parsedAmounts]
   )
 
   const argentWalletContract = useArgentWalletContract()
 
-  // check whether the user has approved the router on the tokens
+  // Standard NonfungiblePositionManager approval for all networks including Zephyr
   const [approvalA, approveACallback] = useApproveCallback(
     argentWalletContract ? undefined : parsedAmounts[Field.CURRENCY_A],
     chainId ? NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[chainId] : undefined
@@ -208,26 +216,85 @@ function AddLiquidity() {
     chainId ? NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[chainId] : undefined
   )
 
+  const finalApprovalA = approvalA
+  const finalApprovalB = approvalB
+
   const allowedSlippage = useUserSlippageToleranceWithDefault(
     outOfRange ? ZERO_PERCENT : DEFAULT_ADD_IN_RANGE_SLIPPAGE_TOLERANCE
   )
 
-  async function onAdd() {
-    if (!chainId || !provider || !account) return
+  const onAdd = useCallback(async () => {
+    setShowConfirm(true)
+    setAttemptingTxn(true)
+    setTxHash('')
 
-    if (!positionManager || !baseCurrency || !quoteCurrency) {
-      return
-    }
+    try {
+      if (position && account && deadline) {
+        if (!positionManager || !baseCurrency || !quoteCurrency) {
+          setAttemptingTxn(false)
+          return
+        }
 
-    if (position && account && deadline) {
-      const useNative = baseCurrency.isNative ? baseCurrency : quoteCurrency.isNative ? quoteCurrency : undefined
-      const { calldata, value } =
-        hasExistingPosition && tokenId
+        const useNative = baseCurrency.isNative ? baseCurrency : quoteCurrency.isNative ? quoteCurrency : undefined
+
+        // Check if pool exists in factory before proceeding
+        if (provider && positionManager) {
+          try {
+            const pmContract = new Contract(
+              positionManager.address,
+              ['function factory() view returns (address)'],
+              provider
+            )
+            const factoryAddress = await pmContract.factory()
+
+            const factoryContract = new Contract(
+              factoryAddress,
+              [
+                'function getPool(address,address,uint24) view returns (address)',
+                'function owner() view returns (address)',
+                'function createPool(address,address,uint24) external returns (address)',
+              ],
+              provider.getSigner()
+            )
+
+            const token0Address = position.pool.token0.address
+            const token1Address = position.pool.token1.address
+            const fee = position.pool.fee
+
+            let poolAddress = await factoryContract.getPool(token0Address, token1Address, fee)
+
+            if (poolAddress === '0x0000000000000000000000000000000000000000') {
+              // Pool does not exist on the factory, create it
+              const createPoolTx = await factoryContract.createPool(token0Address, token1Address, fee)
+              await createPoolTx.wait()
+
+              // Get the pool address after creation
+              poolAddress = await factoryContract.getPool(token0Address, token1Address, fee)
+
+              // Set initial price for the pool
+              const initializePoolContract = new Contract(
+                poolAddress,
+                ['function initialize(uint160 sqrtPriceX96) external'],
+                provider.getSigner()
+              )
+
+              const initialSqrtPriceX96 = calculateOneToOneSqrtPriceX96(position.pool.token0, position.pool.token1)
+              const initializeTx = await initializePoolContract.initialize(initialSqrtPriceX96)
+              await initializeTx.wait()
+            }
+          } catch (poolCheckError) {
+            console.warn('Failed to check/create pool:', poolCheckError)
+            // Continue with the original transaction even if pool check fails
+          }
+        }
+
+        const { calldata, value } = hasExistingPosition
           ? NonfungiblePositionManager.addCallParameters(position, {
-              tokenId,
               slippageTolerance: allowedSlippage,
+              recipient: account,
               deadline: deadline.toString(),
               useNative,
+              createPool: noLiquidity,
             })
           : NonfungiblePositionManager.addCallParameters(position, {
               slippageTolerance: allowedSlippage,
@@ -237,80 +304,54 @@ function AddLiquidity() {
               createPool: noLiquidity,
             })
 
-      let txn: { to: string; data: string; value: string } = {
-        to: NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[chainId],
-        data: calldata,
-        value,
-      }
-
-      if (argentWalletContract) {
-        const amountA = parsedAmounts[Field.CURRENCY_A]
-        const amountB = parsedAmounts[Field.CURRENCY_B]
-        const batch = [
-          ...(amountA && amountA.currency.isToken
-            ? [approveAmountCalldata(amountA, NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[chainId])]
-            : []),
-          ...(amountB && amountB.currency.isToken
-            ? [approveAmountCalldata(amountB, NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[chainId])]
-            : []),
-          {
-            to: txn.to,
-            data: txn.data,
-            value: txn.value,
-          },
-        ]
-        const data = argentWalletContract.interface.encodeFunctionData('wc_multiCall', [batch])
-        txn = {
-          to: argentWalletContract.address,
-          data,
-          value: '0x0',
+        const txn = {
+          to: NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[chainId ?? 1],
+          data: calldata,
+          value,
         }
-      }
 
-      const connectedChainId = await provider.getSigner().getChainId()
-      if (chainId !== connectedChainId) throw new WrongChainError()
-
-      setAttemptingTxn(true)
-
-      provider
-        .getSigner()
-        .estimateGas(txn)
-        .then((estimate) => {
-          const newTxn = {
-            ...txn,
-            gasLimit: calculateGasMargin(estimate),
-          }
-
-          return provider
-            .getSigner()
-            .sendTransaction(newTxn)
-            .then((response: TransactionResponse) => {
-              setAttemptingTxn(false)
-              const transactionInfo: TransactionInfo = {
-                type: TransactionType.ADD_LIQUIDITY_V3_POOL,
-                baseCurrencyId: currencyId(baseCurrency),
-                quoteCurrencyId: currencyId(quoteCurrency),
-                createPool: Boolean(noLiquidity),
-                expectedAmountBaseRaw: parsedAmounts[Field.CURRENCY_A]?.quotient?.toString() ?? '0',
-                expectedAmountQuoteRaw: parsedAmounts[Field.CURRENCY_B]?.quotient?.toString() ?? '0',
-                feeAmount: position.pool.fee,
-              }
-              addTransaction(response, transactionInfo)
-              setTxHash(response.hash)
-            })
-        })
-        .catch((error) => {
-          console.error('Failed to send transaction', error)
+        if (!provider) {
           setAttemptingTxn(false)
-          // we only care if the error is something _other_ than the user rejected the tx
-          if (error?.code !== 4001) {
-            console.error(error)
-          }
+          return
+        }
+
+        const response = await provider.getSigner().sendTransaction({
+          ...txn,
+          gasLimit: 1000000,
         })
-    } else {
-      return
+
+        setAttemptingTxn(false)
+        setTxHash(response.hash)
+        addTransaction(response, {
+          type: TransactionType.ADD_LIQUIDITY_V3_POOL,
+          baseCurrencyId: currencyId(baseCurrency),
+          quoteCurrencyId: currencyId(quoteCurrency),
+          createPool: Boolean(noLiquidity),
+          expectedAmountBaseRaw: parsedAmounts[Field.CURRENCY_A]?.quotient?.toString() ?? '0',
+          expectedAmountQuoteRaw: parsedAmounts[Field.CURRENCY_B]?.quotient?.toString() ?? '0',
+          feeAmount: position.pool.fee,
+        })
+      }
+    } catch (error) {
+      setAttemptingTxn(false)
+      setTxHash('')
+      setShowConfirm(false)
     }
-  }
+  }, [
+    position,
+    account,
+    deadline,
+    positionManager,
+    baseCurrency,
+    quoteCurrency,
+    provider,
+    hasExistingPosition,
+    allowedSlippage,
+    noLiquidity,
+    chainId,
+    addTransaction,
+    parsedAmounts,
+  ])
 
   const handleCurrencySelect = useCallback(
     (currencyNew: Currency, currencyIdOther?: string): (string | undefined)[] => {
@@ -320,7 +361,7 @@ function AddLiquidity() {
         // not ideal, but for now clobber the other if the currency ids are equal
         return [currencyIdNew, undefined]
       } else {
-        // prevent weth + eth
+        // prevent weth + eth (Zephyr has no native currency)
         const isETHOrWETHNew =
           currencyIdNew === 'ETH' ||
           (chainId !== undefined && currencyIdNew === WRAPPED_NATIVE_CURRENCY[chainId]?.address)
@@ -374,6 +415,7 @@ function AddLiquidity() {
 
   const handleDismissConfirmation = useCallback(() => {
     setShowConfirm(false)
+    setAttemptingTxn(false)
     // if there was a tx hash, we want to clear the input
     if (txHash) {
       onFieldAInput('')
@@ -402,9 +444,9 @@ function AddLiquidity() {
 
   // we need an existence check on parsed amounts for single-asset deposits
   const showApprovalA =
-    !argentWalletContract && approvalA !== ApprovalState.APPROVED && !!parsedAmounts[Field.CURRENCY_A]
+    !argentWalletContract && finalApprovalA !== ApprovalState.APPROVED && !!parsedAmounts[Field.CURRENCY_A]
   const showApprovalB =
-    !argentWalletContract && approvalB !== ApprovalState.APPROVED && !!parsedAmounts[Field.CURRENCY_B]
+    !argentWalletContract && finalApprovalB !== ApprovalState.APPROVED && !!parsedAmounts[Field.CURRENCY_B]
 
   const pendingText = `Supplying ${!depositADisabled ? parsedAmounts[Field.CURRENCY_A]?.toSignificant(6) : ''} ${
     !depositADisabled ? currencies[Field.CURRENCY_A]?.symbol : ''
@@ -459,74 +501,98 @@ function AddLiquidity() {
   }, [searchParams])
   // END: sync values with query string
 
-  const Buttons = () =>
-    addIsUnsupported ? (
-      <ButtonPrimary disabled={true} $borderRadius="12px" padding="12px">
-        <ThemedText.DeprecatedMain mb="4px">
-          <Trans>Unsupported Asset</Trans>
-        </ThemedText.DeprecatedMain>
-      </ButtonPrimary>
-    ) : !account ? (
-      <ButtonLight onClick={toggleWalletDrawer} $borderRadius="12px" padding="12px">
-        <Trans>Connect wallet</Trans>
-      </ButtonLight>
-    ) : (
-      <AutoColumn gap="md">
-        {(approvalA === ApprovalState.NOT_APPROVED ||
-          approvalA === ApprovalState.PENDING ||
-          approvalB === ApprovalState.NOT_APPROVED ||
-          approvalB === ApprovalState.PENDING) &&
-          isValid && (
-            <RowBetween>
-              {showApprovalA && (
-                <ButtonPrimary
-                  onClick={approveACallback}
-                  disabled={approvalA === ApprovalState.PENDING}
-                  width={showApprovalB ? '48%' : '100%'}
-                >
-                  {approvalA === ApprovalState.PENDING ? (
-                    <Dots>
-                      <Trans>Approving {currencies[Field.CURRENCY_A]?.symbol}</Trans>
-                    </Dots>
-                  ) : (
-                    <Trans>Approve {currencies[Field.CURRENCY_A]?.symbol}</Trans>
-                  )}
-                </ButtonPrimary>
-              )}
-              {showApprovalB && (
-                <ButtonPrimary
-                  onClick={approveBCallback}
-                  disabled={approvalB === ApprovalState.PENDING}
-                  width={showApprovalA ? '48%' : '100%'}
-                >
-                  {approvalB === ApprovalState.PENDING ? (
-                    <Dots>
-                      <Trans>Approving {currencies[Field.CURRENCY_B]?.symbol}</Trans>
-                    </Dots>
-                  ) : (
-                    <Trans>Approve {currencies[Field.CURRENCY_B]?.symbol}</Trans>
-                  )}
-                </ButtonPrimary>
-              )}
-            </RowBetween>
-          )}
-        <ButtonError
-          onClick={() => {
-            setShowConfirm(true)
-          }}
-          disabled={
-            !isValid ||
-            (!argentWalletContract && approvalA !== ApprovalState.APPROVED && !depositADisabled) ||
-            (!argentWalletContract && approvalB !== ApprovalState.APPROVED && !depositBDisabled) ||
-            priceLower === undefined ||
-            priceUpper === undefined
-          }
-          error={!isValid && !!parsedAmounts[Field.CURRENCY_A] && !!parsedAmounts[Field.CURRENCY_B]}
-        >
-          <Text fontWeight={535}>{errorMessage ? errorMessage : <Trans>Preview</Trans>}</Text>
-        </ButtonError>
-      </AutoColumn>
-    )
+  const buttons = useMemo(
+    () =>
+      addIsUnsupported ? (
+        <ButtonPrimary disabled={true} $borderRadius="12px" padding="12px">
+          <ThemedText.DeprecatedMain mb="4px">
+            <Trans>Unsupported Asset</Trans>
+          </ThemedText.DeprecatedMain>
+        </ButtonPrimary>
+      ) : !account ? (
+        <ButtonLight onClick={toggleWalletDrawer} $borderRadius="12px" padding="12px">
+          <Trans>Connect wallet</Trans>
+        </ButtonLight>
+      ) : (
+        <AutoColumn gap="md">
+          {(finalApprovalA === ApprovalState.NOT_APPROVED ||
+            finalApprovalA === ApprovalState.PENDING ||
+            finalApprovalB === ApprovalState.NOT_APPROVED ||
+            finalApprovalB === ApprovalState.PENDING) &&
+            isValid && (
+              <RowBetween>
+                {showApprovalA && (
+                  <ButtonPrimary
+                    onClick={approveACallback}
+                    disabled={finalApprovalA === ApprovalState.PENDING}
+                    width={showApprovalB ? '48%' : '100%'}
+                  >
+                    {finalApprovalA === ApprovalState.PENDING ? (
+                      <Dots>
+                        <Trans>Approving {currencies[Field.CURRENCY_A]?.symbol}</Trans>
+                      </Dots>
+                    ) : (
+                      <Trans>Approve {currencies[Field.CURRENCY_A]?.symbol}</Trans>
+                    )}
+                  </ButtonPrimary>
+                )}
+                {showApprovalB && (
+                  <ButtonPrimary
+                    onClick={approveBCallback}
+                    disabled={finalApprovalB === ApprovalState.PENDING}
+                    width={showApprovalA ? '48%' : '100%'}
+                  >
+                    {finalApprovalB === ApprovalState.PENDING ? (
+                      <Dots>
+                        <Trans>Approving {currencies[Field.CURRENCY_B]?.symbol}</Trans>
+                      </Dots>
+                    ) : (
+                      <Trans>Approve {currencies[Field.CURRENCY_B]?.symbol}</Trans>
+                    )}
+                  </ButtonPrimary>
+                )}
+              </RowBetween>
+            )}
+          <ButtonError
+            onClick={() => {
+              setShowConfirm(true)
+            }}
+            disabled={
+              attemptingTxn ||
+              !isValid ||
+              (!argentWalletContract && finalApprovalA !== ApprovalState.APPROVED && !depositADisabled) ||
+              (!argentWalletContract && finalApprovalB !== ApprovalState.APPROVED && !depositBDisabled) ||
+              priceLower === undefined ||
+              priceUpper === undefined
+            }
+            error={!isValid && !!parsedAmounts[Field.CURRENCY_A] && !!parsedAmounts[Field.CURRENCY_B]}
+          >
+            <Text fontWeight={535}>{errorMessage ? errorMessage : <Trans>Preview</Trans>}</Text>
+          </ButtonError>
+        </AutoColumn>
+      ),
+    [
+      addIsUnsupported,
+      account,
+      toggleWalletDrawer,
+      finalApprovalA,
+      finalApprovalB,
+      isValid,
+      showApprovalA,
+      showApprovalB,
+      approveACallback,
+      approveBCallback,
+      currencies,
+      attemptingTxn,
+      argentWalletContract,
+      depositADisabled,
+      depositBDisabled,
+      priceLower,
+      priceUpper,
+      parsedAmounts,
+      errorMessage,
+    ]
+  )
 
   const usdcValueCurrencyA = usdcValues[Field.CURRENCY_A]
   const usdcValueCurrencyB = usdcValues[Field.CURRENCY_B]
@@ -545,7 +611,14 @@ function AddLiquidity() {
     [usdcValueCurrencyB]
   )
 
-  const owner = useSingleCallResult(tokenId ? positionManager : null, 'ownerOf', [tokenId]).result?.[0]
+  // Get NFT owner with proper Zephyr support
+  const isZephyrNetwork = chainId === ZEPHYR_CHAIN_ID
+  const zephyrOwner = useZephyrNFTOwner(isZephyrNetwork && parsedTokenId ? parsedTokenId : undefined)
+  const standardOwner = useSingleCallResult(!isZephyrNetwork && parsedTokenId ? positionManager : null, 'ownerOf', [
+    parsedTokenId,
+  ]).result?.[0]
+
+  const owner = isZephyrNetwork ? zephyrOwner : standardOwner
   const ownsNFT =
     addressesAreEquivalent(owner, account) || addressesAreEquivalent(existingPositionDetails?.operator, account)
   const showOwnershipWarning = Boolean(hasExistingPosition && account && !ownsNFT)
@@ -574,7 +647,13 @@ function AddLiquidity() {
                 />
               )}
               bottomContent={() => (
-                <ButtonPrimary style={{ marginTop: '1rem' }} onClick={onAdd}>
+                <ButtonPrimary
+                  style={{ marginTop: '1rem' }}
+                  onClick={() => {
+                    onAdd()
+                  }}
+                  disabled={attemptingTxn}
+                >
                   <Text fontWeight={535} fontSize={20}>
                     <Trans>Add</Trans>
                   </Text>
@@ -867,7 +946,7 @@ function AddLiquidity() {
                   </AutoColumn>
                 </DynamicSection>
               </div>
-              <Buttons />
+              {buttons}
             </ResponsiveTwoColumns>
           </Wrapper>
         </StyledBodyWrapper>

@@ -1,9 +1,10 @@
 import { BigNumber } from '@ethersproject/bignumber'
 import { t } from '@lingui/macro'
 import { Percent } from '@uniswap/sdk-core'
-import { SwapRouter, UNIVERSAL_ROUTER_ADDRESS } from '@uniswap/universal-router-sdk'
+import { SwapRouter } from '@uniswap/universal-router-sdk'
 import { FeeOptions, toHex } from '@uniswap/v3-sdk'
 import { useWeb3React } from '@web3-react/core'
+import { getUniversalRouterAddress } from 'constants/addresses'
 import { useCallback } from 'react'
 import { ClassicTrade, TradeFillType } from 'state/routing/types'
 import { calculateGasMargin } from 'utils/calculateGasMargin'
@@ -48,6 +49,7 @@ export function useUniversalRouterSwapCallback(trade: ClassicTrade | undefined, 
       if (!chainId) throw new Error('missing chainId')
       if (!provider) throw new Error('missing provider')
       if (!trade) throw new Error('missing trade')
+
       const connectedChainId = await provider.getSigner().getChainId()
       if (chainId !== connectedChainId) throw new WrongChainError()
 
@@ -64,7 +66,7 @@ export function useUniversalRouterSwapCallback(trade: ClassicTrade | undefined, 
 
       const tx = {
         from: account,
-        to: UNIVERSAL_ROUTER_ADDRESS(chainId),
+        to: getUniversalRouterAddress(chainId),
         data,
         // TODO(https://github.com/Uniswap/universal-router-sdk/issues/113): universal-router-sdk returns a non-hexlified value.
         ...(value && !isZero(value) ? { value: toHex(value) } : {}),

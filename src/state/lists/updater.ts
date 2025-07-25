@@ -1,5 +1,6 @@
 import { getVersionUpgrade, VersionUpgrade } from '@uniswap/token-lists'
 import { useWeb3React } from '@web3-react/core'
+import { ZEPHYR_CHAIN_ID } from 'constants/chains'
 import { DEFAULT_LIST_OF_LISTS } from 'constants/lists'
 import TokenSafetyLookupTable from 'constants/tokenSafetyLookup'
 import { useStateRehydrated } from 'hooks/useStateRehydrated'
@@ -15,7 +16,7 @@ import { acceptListUpdate } from './actions'
 import { shouldAcceptVersionUpdate } from './utils'
 
 export default function Updater(): null {
-  const { provider } = useWeb3React()
+  const { provider, chainId } = useWeb3React()
   const dispatch = useAppDispatch()
   const isWindowVisible = useIsWindowVisible()
 
@@ -31,17 +32,26 @@ export default function Updater(): null {
   const fetchList = useFetchListCallback()
   const fetchAllListsCallback = useCallback(() => {
     if (!isWindowVisible) return
+    // NOTE: Skip external token list fetching for Zephyr network
+    if (chainId === ZEPHYR_CHAIN_ID) {
+      return
+    }
     DEFAULT_LIST_OF_LISTS.forEach((url) => {
       // Skip validation on unsupported lists
       fetchList(url).catch((error) => console.debug('interval list fetching error', error))
     })
-  }, [fetchList, isWindowVisible])
+  }, [fetchList, isWindowVisible, chainId])
 
   // fetch all lists every 10 minutes, but only after we initialize provider
   useInterval(fetchAllListsCallback, provider ? ms(`10m`) : null)
 
   useEffect(() => {
     if (!rehydrated) return // loaded lists will not be available until state is rehydrated
+
+    // NOTE: Skip external token list fetching for Zephyr network
+    if (chainId === ZEPHYR_CHAIN_ID) {
+      return
+    }
 
     // whenever a list is not loaded and not loading, try again to load it
     Object.keys(lists).forEach((listUrl) => {
@@ -50,7 +60,7 @@ export default function Updater(): null {
         fetchList(listUrl).catch((error) => console.debug('list added fetching error', error))
       }
     })
-  }, [dispatch, fetchList, lists, rehydrated])
+  }, [dispatch, fetchList, lists, rehydrated, chainId])
 
   // automatically update lists if versions are minor/patch
   useEffect(() => {

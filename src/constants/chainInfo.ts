@@ -18,7 +18,7 @@ import polygonMaticLogo from 'assets/svg/polygon-matic-logo.svg'
 import ms from 'ms'
 import { darkTheme } from 'theme/colors'
 
-import { SupportedL1ChainId, SupportedL2ChainId } from './chains'
+import { SupportedL1ChainId, SupportedL2ChainId, ZEPHYR_CHAIN_ID } from './chains'
 import { ARBITRUM_LIST, AVALANCHE_LIST, BASE_LIST, CELO_LIST, OPTIMISM_LIST, PLASMA_BNB_LIST } from './lists'
 
 export const AVERAGE_L1_BLOCK_TIME = ms(`12s`)
@@ -60,7 +60,9 @@ export interface L2ChainInfo extends BaseChainInfo {
   readonly defaultListUrl: string
 }
 
-type ChainInfoMap = { readonly [chainId: number]: L1ChainInfo | L2ChainInfo } & {
+type ChainInfoMap = {
+  readonly [chainId: number]: L1ChainInfo | L2ChainInfo
+} & {
   readonly [chainId in SupportedL2ChainId]: L2ChainInfo
 } & { readonly [chainId in SupportedL1ChainId]: L1ChainInfo }
 
@@ -92,7 +94,11 @@ const CHAIN_INFO: ChainInfoMap = {
     infoLink: 'https://info.uniswap.org/#/',
     label: 'Sepolia',
     logoUrl: ethereumLogoUrl,
-    nativeCurrency: { name: 'Sepolia Ether', symbol: 'SepoliaETH', decimals: 18 },
+    nativeCurrency: {
+      name: 'Sepolia Ether',
+      symbol: 'SepoliaETH',
+      decimals: 18,
+    },
     color: darkTheme.chain_5,
   },
   [ChainId.OPTIMISM]: {
@@ -126,7 +132,11 @@ const CHAIN_INFO: ChainInfoMap = {
     logoUrl: optimismLogoUrl,
     statusPage: 'https://optimism.io/status',
     helpCenterUrl: 'https://help.uniswap.org/en/collections/3137778-uniswap-on-optimistic-ethereum-oξ',
-    nativeCurrency: { name: 'Optimism Goerli Ether', symbol: 'görOpETH', decimals: 18 },
+    nativeCurrency: {
+      name: 'Optimism Goerli Ether',
+      symbol: 'görOpETH',
+      decimals: 18,
+    },
     color: darkTheme.chain_420,
   },
   [ChainId.ARBITRUM_ONE]: {
@@ -156,7 +166,11 @@ const CHAIN_INFO: ChainInfoMap = {
     logoUrl: arbitrumLogoUrl,
     defaultListUrl: ARBITRUM_LIST, // TODO: use arbitrum goerli token list
     helpCenterUrl: 'https://help.uniswap.org/en/collections/3137787-uniswap-on-arbitrum',
-    nativeCurrency: { name: 'Goerli Arbitrum Ether', symbol: 'goerliArbETH', decimals: 18 },
+    nativeCurrency: {
+      name: 'Goerli Arbitrum Ether',
+      symbol: 'goerliArbETH',
+      decimals: 18,
+    },
     color: darkTheme.chain_421613,
   },
   [ChainId.POLYGON]: {
@@ -183,7 +197,11 @@ const CHAIN_INFO: ChainInfoMap = {
     infoLink: 'https://info.uniswap.org/#/polygon/',
     label: 'Polygon Mumbai',
     logoUrl: polygonMaticLogo,
-    nativeCurrency: { name: 'Polygon Mumbai Matic', symbol: 'mMATIC', decimals: 18 },
+    nativeCurrency: {
+      name: 'Polygon Mumbai Matic',
+      symbol: 'mMATIC',
+      decimals: 18,
+    },
   },
   [ChainId.CELO]: {
     networkType: NetworkType.L1,
@@ -259,6 +277,17 @@ const CHAIN_INFO: ChainInfoMap = {
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     color: darkTheme.chain_84531,
   },
+  [ZEPHYR_CHAIN_ID]: {
+    networkType: NetworkType.L1,
+    blockWaitMsBeforeWarning: ms(`10m`),
+    docs: 'https://docs.zephyr.network/', // TODO: from env vars?
+    explorer: 'https://zephyr-blockscout.eu-north-2.gateway.fm',
+    infoLink: 'https://info.uniswap.org/#/zephyr/',
+    label: 'Zephyr',
+    logoUrl: ethereumLogoUrl, // TODO: Add Zephyr logo
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    color: darkTheme.chain_1,
+  },
 } as const
 
 export function getChainInfo(chainId: SupportedL1ChainId): L1ChainInfo
@@ -283,7 +312,7 @@ export function getChainInfo(chainId: any): any {
   return undefined
 }
 
-const MAINNET_INFO = CHAIN_INFO[ChainId.MAINNET]
+const ZEPHYR_INFO = CHAIN_INFO[ZEPHYR_CHAIN_ID]
 export function getChainInfoOrDefault(chainId: number | undefined) {
-  return getChainInfo(chainId) ?? MAINNET_INFO
+  return getChainInfo(chainId) ?? ZEPHYR_INFO
 }
