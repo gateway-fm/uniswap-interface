@@ -55,6 +55,7 @@ createRoot(container).render(
               <BlockNumberProvider>
                 <Updaters />
                 <ThemeProvider>
+                  {/* @ts-ignore */}
                   <ThemedGlobalStyle />
                   <App />
                 </ThemeProvider>

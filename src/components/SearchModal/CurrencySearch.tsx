@@ -11,7 +11,6 @@ import { useSortTokensByQuery } from 'lib/hooks/useTokenList/sorting'
 import { ChangeEvent, KeyboardEvent, RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AutoSizer from 'react-virtualized-auto-sizer'
 import { FixedSizeList } from 'react-window'
-import { Text } from 'rebass'
 import styled, { useTheme } from 'styled-components'
 import { CloseIcon, ThemedText } from 'theme/components'
 
@@ -158,9 +157,9 @@ export function CurrencySearch({
     <ContentWrapper>
       <PaddedColumn gap="16px">
         <RowBetween>
-          <Text fontWeight={535} fontSize={16}>
+          <ThemedText.DeprecatedBody fontWeight={535} fontSize={16}>
             <Trans>Select a token</Trans>
-          </Text>
+          </ThemedText.DeprecatedBody>
           <CloseIcon onClick={onDismiss} />
         </RowBetween>
         <Row>
@@ -194,7 +193,7 @@ export function CurrencySearch({
       ) : searchCurrencies?.length > 0 || filteredInactiveTokens?.length > 0 ? (
         <div style={{ flex: '1' }}>
           <AutoSizer disableWidth>
-            {({ height }) => (
+            {({ height }: { height: number }) => (
               <CurrencyList
                 height={height}
                 currencies={searchCurrencies}
